@@ -1,0 +1,120 @@
+services:
+
+  minio:
+    image: minio/minio
+    container_name: minio_docker_base
+
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password
+
+    volumes:
+      - minio_data:/data
+
+    command: server /data --console-address ":9001"
+
+    networks:
+      - red_aplicaciones
+
+
+  jupyter:
+    image: jupyter/pyspark-notebook:spark-3.4.1
+    container_name: jupyter_notebook_basico
+
+    ports:
+      - "8890:8888"
+
+    volumes:
+      - ./notebooks:/home/jovyan/work
+      - ./requirements.txt:/tmp/requirements.txt
+
+    command: >
+      bash -c "
+      pip install --no-cache-dir -r /tmp/requirements.txt &&
+      jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token='' --NotebookApp.password=''"
+
+    networks:
+      - red_aplicaciones
+
+
+  postgres_nessie:
+    image: postgres:16
+    container_name: postgres_nessie
+
+    environment:
+      POSTGRES_DB: nessie
+      POSTGRES_USER: nessie
+      POSTGRES_PASSWORD: nessie
+
+    volumes:
+      - nessie_db:/var/lib/postgresql/data
+
+    networks:
+      - red_aplicaciones
+
+
+  nessie:
+    image: ghcr.io/projectnessie/nessie:latest
+    container_name: nessie-pyiceberg
+
+    ports:
+      - "19120:19120"
+
+    environment:
+      - nessie.version.store.type=JDBC
+      - nessie.version.store.persist.jdbc.datasource=postgresql
+      - quarkus.datasource.postgresql.jdbc.url=jdbc:postgresql://postgres_nessie:5432/nessie
+      - quarkus.datasource.postgresql.username=nessie
+      - quarkus.datasource.postgresql.password=nessie
+
+      - nessie.catalog.default-warehouse=warehouse
+      - nessie.catalog.warehouses.warehouse.location=s3://my-bucket/
+      - nessie.catalog.service.s3.default-options.endpoint=http://minio:9000/
+      - nessie.catalog.service.s3.default-options.access-key=urn:nessie-secret:quarkus:nessie.catalog.secrets.access-key
+      - nessie.catalog.service.s3.default-options.path-style-access=true
+      - nessie.catalog.service.s3.default-options.auth-type=STATIC
+      - nessie.catalog.secrets.access-key.name=admin
+      - nessie.catalog.secrets.access-key.secret=password
+      - nessie.catalog.service.s3.default-options.region=us-east-1
+      - nessie.server.authentication.enabled=false
+
+    depends_on:
+      - postgres_nessie
+      - minio
+
+    networks:
+      - red_aplicaciones
+
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse_grupo3
+
+    ports:
+      - "8123:8123"
+      - "9002:9000"
+
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: default
+
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+
+    networks:
+      - red_aplicaciones
+
+
+networks:
+  red_aplicaciones:
+    driver: bridge
+
+
+volumes:
+  minio_data:
+  nessie_db:
+  clickhouse_data:
